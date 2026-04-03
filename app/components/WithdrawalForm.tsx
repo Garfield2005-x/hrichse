@@ -31,6 +31,12 @@ interface FormState {
   bankName: string;
 }
 
+interface ImageData {
+  url: string;
+  width: number;
+  height: number;
+}
+
 export default function WithdrawalForm() {
   const [form, setForm] = useState<FormState>({
     date: new Date().toLocaleDateString('th-TH', { 
@@ -50,7 +56,7 @@ export default function WithdrawalForm() {
     { no: 1, description: '', purpose: '', amount: 0, note: '' },
   ]);
 
-  const [images, setImages] = useState<string[]>([]);
+  const [images, setImages] = useState<ImageData[]>([]);
   const [isExporting, setIsExporting] = useState(false);
   const [totalAmount, setTotalAmount] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -86,7 +92,16 @@ export default function WithdrawalForm() {
       Array.from(files).forEach(file => {
         const reader = new FileReader();
         reader.onloadend = () => {
-          setImages(prev => [...prev, reader.result as string]);
+          const url = reader.result as string;
+          const img = new Image();
+          img.onload = () => {
+            setImages(prev => [...prev, {
+                url,
+                width: img.naturalWidth || 300,
+                height: img.naturalHeight || 300
+            }]);
+          };
+          img.src = url;
         };
         reader.readAsDataURL(file);
       });
@@ -112,7 +127,20 @@ export default function WithdrawalForm() {
           const base64 = tagValue.split(',')[1];
           return Buffer.from(base64, 'base64');
         },
-        getSize: () => [300, 300], // Scale receipts to 3x3 inches roughly
+        getSize: (img: any, tagValue: string) => {
+          const found = images.find(i => i.url === tagValue);
+          const w = found?.width || 300;
+          const h = found?.height || 300;
+          
+          const maxWidth = 450;
+          const ratio = w / h;
+          
+          // Preserving aspect ratio while fitting within maxWidth
+          if (w > maxWidth) {
+              return [maxWidth, Math.round(maxWidth / ratio)];
+          }
+          return [w, h];
+        },
       };
       const imageModule = new ImageModule(opts);
 
@@ -139,7 +167,7 @@ export default function WithdrawalForm() {
         })),
         totalAmount: totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2 }),
         hasImages: images.length > 0,
-        images: images.map(img => ({ image: img })),
+        images: images.map(img => ({ image: img.url })),
       });
 
       const blob = doc.getZip().generate({
@@ -309,7 +337,7 @@ export default function WithdrawalForm() {
                         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                             {images.map((img, index) => (
                                 <div key={index} className="aspect-square relative rounded-2xl md:rounded-3xl overflow-hidden border-2 border-slate-100 shadow-md group">
-                                    <img src={img} alt="Receipt" className="w-full h-full object-cover transition-transform group-hover:scale-110" />
+                                    <img src={img.url} alt="Receipt" className="w-full h-full object-cover transition-transform group-hover:scale-110" />
                                     <button onClick={() => removeImage(index)} className="absolute top-2 right-2 w-6 h-6 bg-red-500 text-white rounded-lg flex items-center justify-center shadow-lg opacity-0 group-hover:opacity-100 transition-opacity">
                                         <X className="w-4 h-4" />
                                     </button>
