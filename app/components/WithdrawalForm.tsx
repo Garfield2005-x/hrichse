@@ -37,29 +37,103 @@ interface ImageData {
   height: number;
 }
 
+const STORAGE_KEY = 'withdrawal_form_draft_v1';
+
+const initialForm: FormState = {
+  date: new Date().toLocaleDateString('th-TH', { 
+      year: 'numeric', 
+      month: 'long', 
+      day: 'numeric' 
+  }),
+  requesterName: '',
+  position: '',
+  requestCategory: 'other',
+  otherDetail: '',
+  accountNumber: '',
+  bankName: '',
+};
+
+const initialItems: WithdrawalItem[] = [
+  { no: 1, description: '', purpose: '', amount: 0, note: '' },
+];
+
+const EMPLOYEE_DB = [
+  { name: 'นางสาวศิญาณืนท์ ดำมี', position: 'Secretary', bankName: 'ธนาคารออมสิน', accountNumber: '020224093045' },
+  { name: 'นายธนภูมิ ทาทอง', position: 'Content Creator', bankName: 'ธนาคารกรุงเทพ', accountNumber: '0797201993' },
+  { name: 'นายพีรชาดา ลี้รัตนา', position: 'Content Creator', bankName: 'ธนาคารกรุงไทย', accountNumber: '2180662041' },
+  { name: 'นายกฤตดนัย เนียมนิล', position: 'Graphic Designer', bankName: 'ธนาคารกสิกร', accountNumber: '1218046912' },
+  { name: 'นายวรเมธ แพนลา', position: 'AFF', bankName: 'ธนาคารกสิกร', accountNumber: '0561304718' },
+  { name: 'นางสาวอภิชา มีหวัง', position: 'Secretary', bankName: 'ธนาคารไทยพาณิชย์', accountNumber: '8842454641' },
+  { name: 'นายเพชรพงษ์ นาคแกมทอง', position: 'IT Support', bankName: 'ธนาคารกรุงไทย', accountNumber: '4753540960' },
+  { name: 'นายณัฐกานต์ พันธ์ศิริ', position: 'Content Creator', bankName: 'กสิกร', accountNumber: '0361359321' },
+];
+
 export default function WithdrawalForm() {
-  const [form, setForm] = useState<FormState>({
-    date: new Date().toLocaleDateString('th-TH', { 
-        year: 'numeric', 
-        month: 'long', 
-        day: 'numeric' 
-    }),
-    requesterName: '',
-    position: '',
-    requestCategory: 'other',
-    otherDetail: '',
-    accountNumber: '',
-    bankName: '',
-  });
-
-  const [items, setItems] = useState<WithdrawalItem[]>([
-    { no: 1, description: '', purpose: '', amount: 0, note: '' },
-  ]);
-
+  const [form, setForm] = useState<FormState>(initialForm);
+  const [items, setItems] = useState<WithdrawalItem[]>(initialItems);
   const [images, setImages] = useState<ImageData[]>([]);
   const [isExporting, setIsExporting] = useState(false);
   const [totalAmount, setTotalAmount] = useState(0);
+  const [lastSaved, setLastSaved] = useState<string | null>(null);
+  
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const isInitialMount = useRef(true);
+
+  // Load from LocalStorage
+  useEffect(() => {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      try {
+        const { form: sForm, items: sItems, images: sImages } = JSON.parse(saved);
+        if (sForm) setForm(sForm);
+        if (sItems) setItems(sItems);
+        if (sImages) setImages(sImages);
+        setLastSaved(new Date().toLocaleTimeString('th-TH'));
+      } catch (e) {
+        console.error('Failed to load draft', e);
+      }
+    }
+    isInitialMount.current = false;
+  }, []);
+
+  // Save to LocalStorage
+  useEffect(() => {
+    if (isInitialMount.current) return;
+    
+    const timer = setTimeout(() => {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ form, items, images }));
+      setLastSaved(new Date().toLocaleTimeString('th-TH'));
+    }, 1000);
+
+    return () => clearTimeout(timer);
+  }, [form, items, images]);
+
+  const handleResetForm = () => {
+    if (window.confirm('คุณต้องการรีเซ็ตข้อมูลทั้งหมดใช่หรือไม่? ข้อมูลที่พิมพ์ไว้จะหายไป')) {
+      setForm(initialForm);
+      setItems(initialItems);
+      setImages([]);
+      localStorage.removeItem(STORAGE_KEY);
+      setLastSaved(null);
+    }
+  };
+
+  const validateForm = () => {
+    if (!form.requesterName.trim()) return 'กรุณาระบุชื่อผู้เบิก';
+    if (!form.bankName.trim()) return 'กรุณาระบุชื่อธนาคาร';
+    if (!form.accountNumber.trim()) return 'กรุณาระบุเลขที่บัญชี';
+    
+    const validItems = items.filter(item => item.description.trim() && item.amount > 0);
+    if (validItems.length === 0) return 'กรุณาระบุรายการค่าใช้จ่ายอย่างน้อย 1 รายการ พร้อมระบุจำนวนเงิน';
+    
+    if (images.length === 0) {
+        if (!window.confirm('คุณยังไม่ได้แนบหลักฐานสลิป/หลักฐานการจ่ายเงิน ต้องการดำเนินการต่อหรือไม่?')) {
+            return 'CANCELLED';
+        }
+    }
+    
+    return null;
+  };
 
   useEffect(() => {
     const total = items.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
@@ -113,6 +187,12 @@ export default function WithdrawalForm() {
   };
 
   const handleExportDocx = async () => {
+    const error = validateForm();
+    if (error) {
+      if (error !== 'CANCELLED') alert(error);
+      return;
+    }
+
     setIsExporting(true);
     try {
       const response = await fetch('/templates/expense_template.docx');
@@ -198,11 +278,21 @@ export default function WithdrawalForm() {
             <p className="flex items-center gap-2 text-slate-400 text-[8px] md:text-[10px] font-bold uppercase tracking-[0.2em] md:tracking-[0.3em]">
                 <CheckCircle2 className="w-3 h-3 md:w-4 md:h-4 text-green-500" /> Original File Mode Active
             </p>
+            {lastSaved && (
+                <p className="text-[8px] font-medium text-slate-400 italic">
+                    บันทึกร่างเมื่อ {lastSaved}
+                </p>
+            )}
           </div>
-          <Button onClick={handleExportDocx} className="h-12 md:h-16 px-6 md:px-10 rounded-2xl md:rounded-3xl bg-slate-900 hover:bg-black text-white font-black transition-all shadow-xl active:scale-95 disabled:opacity-50 text-sm md:text-base" disabled={isExporting}>
-              {isExporting ? <Loader2 className="w-4 h-4 md:w-6 md:h-6 mr-2 md:mr-3 animate-spin text-blue-500" /> : <FileText className="w-4 h-4 md:w-6 md:h-6 mr-2 md:mr-3 text-blue-400" />}
-              {isExporting ? 'GENERATING...' : 'DOWNLOAD DOCX'}
-          </Button>
+          <div className="flex items-center gap-3">
+              <Button onClick={handleResetForm} variant="ghost" className="h-12 md:h-16 px-4 md:px-6 rounded-2xl md:rounded-3xl text-slate-400 hover:text-red-500 hover:bg-red-50 transition-all font-bold text-xs md:text-sm">
+                  RESET
+              </Button>
+              <Button onClick={handleExportDocx} className="h-12 md:h-16 px-6 md:px-10 rounded-2xl md:rounded-3xl bg-slate-900 hover:bg-black text-white font-black transition-all shadow-xl active:scale-95 disabled:opacity-50 text-sm md:text-base" disabled={isExporting}>
+                  {isExporting ? <Loader2 className="w-4 h-4 md:w-6 md:h-6 mr-2 md:mr-3 animate-spin text-blue-500" /> : <FileText className="w-4 h-4 md:w-6 md:h-6 mr-2 md:mr-3 text-blue-400" />}
+                  {isExporting ? 'GENERATING...' : 'DOWNLOAD DOCX'}
+              </Button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 md:gap-6">
@@ -215,7 +305,35 @@ export default function WithdrawalForm() {
                         <span className="w-4 md:w-8 h-px bg-blue-500/30" /> ข้อมูลผู้เบิก
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
-                        <Input label="ชื่อ-นามสกุล" placeholder="ระบุชื่อผู้เบิก..." value={form.requesterName} onChange={(e) => setForm({ ...form, requesterName: e.target.value })} icon={<User className="text-blue-500 w-4 h-4" />} />
+                        <div className="relative">
+                            <Input 
+                                label="ชื่อ-นามสกุล" 
+                                placeholder="ระบุชื่อผู้เบิก..." 
+                                value={form.requesterName} 
+                                list="employee-list"
+                                onChange={(e) => {
+                                    const name = e.target.value;
+                                    const employee = EMPLOYEE_DB.find(emp => emp.name === name);
+                                    if (employee) {
+                                        setForm({ 
+                                            ...form, 
+                                            requesterName: name,
+                                            position: employee.position,
+                                            bankName: employee.bankName,
+                                            accountNumber: employee.accountNumber
+                                        });
+                                    } else {
+                                        setForm({ ...form, requesterName: name });
+                                    }
+                                }} 
+                                icon={<User className="text-blue-500 w-4 h-4" />} 
+                            />
+                            <datalist id="employee-list">
+                                {EMPLOYEE_DB.map(emp => (
+                                    <option key={emp.name} value={emp.name} />
+                                ))}
+                            </datalist>
+                        </div>
                         <Input label="ตำแหน่ง" placeholder="ระบุตำแหน่ง..." value={form.position} onChange={(e) => setForm({ ...form, position: e.target.value })} icon={<Briefcase className="text-blue-500 w-4 h-4" />} />
                     </div>
                 </div>
